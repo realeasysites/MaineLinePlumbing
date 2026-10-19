@@ -24,15 +24,14 @@ ${body}
 
 router.get('/admin/login', (req, res) => {
   if (req.session && req.session.adminEmail) return res.redirect('/admin');
-  const error = req.query.error ? '<p class="error">Incorrect email or password.</p>' : '';
+  const error = req.query.error ? '<p class="error">Incorrect password.</p>' : '';
   res.send(layout('Log In', `
     <div class="login-wrap">
       <img src="/images/logo.png" alt="Maine-Line Plumbing LLC" class="login-logo">
       <h1>Admin Login</h1>
       ${error}
       <form method="POST" action="/admin/login">
-        <label>Email<input type="email" name="email" required autofocus></label>
-        <label>Password<input type="password" name="password" required></label>
+        <label>Password<input type="password" name="password" required autofocus></label>
         <button type="submit">Log In</button>
       </form>
     </div>
@@ -40,9 +39,11 @@ router.get('/admin/login', (req, res) => {
 });
 
 router.post('/admin/login', (req, res) => {
-  const { email, password } = req.body;
-  const admin = db.prepare('SELECT * FROM admins WHERE email = ?').get((email || '').toLowerCase().trim());
-  if (!admin || !bcrypt.compareSync(password || '', admin.password_hash)) {
+  // Password-only login: matches the password against the admin account(s).
+  const { password } = req.body;
+  const admin = db.prepare('SELECT * FROM admins ORDER BY id').all()
+    .find((a) => bcrypt.compareSync(password || '', a.password_hash));
+  if (!admin) {
     return res.redirect('/admin/login?error=1');
   }
   req.session.adminEmail = admin.email;
@@ -70,6 +71,9 @@ router.get('/admin', requireAdmin, (req, res) => {
           <select name="status" onchange="this.form.submit()">
             ${STATUSES.map((s) => `<option value="${s}" ${s === l.status ? 'selected' : ''}>${s}</option>`).join('')}
           </select>
+        </form>
+        <form method="POST" action="/admin/leads/${l.id}/delete" class="delete-form" onsubmit="return confirm('Delete this request? This cannot be undone.');">
+          <button type="submit" style="margin-top:6px;background:transparent;color:#b3261e;border:1px solid #e3b9b4;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:.85rem">Delete</button>
         </form>
       </td>
     </tr>
@@ -103,6 +107,12 @@ router.post('/admin/leads/:id/status', requireAdmin, (req, res) => {
   const { status } = req.body;
   if (!STATUSES.includes(status)) return res.redirect('/admin');
   db.prepare('UPDATE leads SET status = ? WHERE id = ?').run(status, req.params.id);
+  res.redirect('/admin');
+});
+
+// Delete a request that isn't a real lead (spam, test, wrong number).
+router.post('/admin/leads/:id/delete', requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM leads WHERE id = ?').run(req.params.id);
   res.redirect('/admin');
 });
 
